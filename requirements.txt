@@ -1,4 +1,4 @@
-openai>=1.0.0
+google-generativeai>=0.8.0
 SpeechRecognition==3.14.5
 gTTS==2.5.4
 pygame>=2.5.0
