@@ -21,6 +21,7 @@ import tempfile
 import requests
 from datetime import datetime
 from collections import Counter
+import re
 
 from dotenv import load_dotenv
 
@@ -596,7 +597,12 @@ class Vega:
                         "content": (
                             "Você é um assistente virtual chamado Vega. "
                             "Responda sempre em português, de forma "
-                            "educada, útil, clara e relativamente concisa."
+                            "educada, útil, clara e relativamente concisa. "
+                            "Sua resposta será convertida em áudio e falada "
+                            "em voz alta, então responda em texto corrido, "
+                            "sem markdown: não use asteriscos, hashtags, "
+                            "listas numeradas, marcadores ou qualquer "
+                            "formatação especial."
                         ),
                     },
                     {"role": "user", "content": text},
@@ -616,6 +622,55 @@ class Vega:
             )
 
     # =========================================================
+    # LIMPEZA DE MARKDOWN (para a fala soar natural)
+    # =========================================================
+
+    def _clean_markdown(self, text):
+        """
+        Remove formatação markdown do texto (negrito, itálico, títulos,
+        listas, links, blocos de código etc.) para que o pyttsx3 não
+        leia símbolos como asteriscos e hashtags em voz alta.
+        """
+
+        cleaned = text
+
+        # Remove blocos de código ```...```
+        cleaned = re.sub(r"```.*?```", "", cleaned, flags=re.DOTALL)
+
+        # Remove código inline `texto`
+        cleaned = re.sub(r"`([^`]*)`", r"\1", cleaned)
+
+        # Remove negrito/itálico (**texto**, __texto__, *texto*, _texto_)
+        cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+        cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
+        cleaned = re.sub(r"\*(.*?)\*", r"\1", cleaned)
+        cleaned = re.sub(r"(?<!\w)_(.*?)_(?!\w)", r"\1", cleaned)
+
+        # Remove cabeçalhos markdown (#, ##, ### ...)
+        cleaned = re.sub(r"^#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
+
+        # Remove links markdown [texto](url) -> texto
+        cleaned = re.sub(r"\[([^\]]*)\]\([^\)]*\)", r"\1", cleaned)
+
+        # Remove marcadores de lista (-, *, •) no início da linha
+        cleaned = re.sub(r"^\s*[\-\*•]\s+", "", cleaned, flags=re.MULTILINE)
+
+        # Remove numeração de listas (1. 2. etc.)
+        cleaned = re.sub(r"^\s*\d+[\.\)]\s+", "", cleaned, flags=re.MULTILINE)
+
+        # Remove linhas horizontais (---, ***, ___)
+        cleaned = re.sub(r"^[\-\*_]{3,}\s*$", "", cleaned, flags=re.MULTILINE)
+
+        # Colapsa quebras de linha em pausas naturais para a fala
+        cleaned = re.sub(r"\n{2,}", ". ", cleaned)
+        cleaned = cleaned.replace("\n", " ")
+
+        # Remove espaços duplicados
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+
+        return cleaned
+
+    # =========================================================
     # FALAR
     # =========================================================
 
@@ -625,7 +680,7 @@ class Vega:
         Pode ser interrompida a qualquer momento.
         """
 
-        print(f"Vega: {text}\n")
+        # print(f"Vega: {text}\n")
 
         self.speaking = True
         self.interrupt_event.clear()
@@ -639,6 +694,8 @@ class Vega:
             tempfile.gettempdir(),
             "vega_fala.wav"
         )
+
+        speech_text = self._clean_markdown(text)
 
         try:
             # Gera o áudio
@@ -660,8 +717,8 @@ class Vega:
             engine.setProperty("rate", SPEECH_RATE)
             engine.setProperty("volume", 1.0)
 
-            # Salva em arquivo
-            engine.save_to_file(text, audio_file)
+            # Salva em arquivo (usando o texto já sem markdown)
+            engine.save_to_file(speech_text, audio_file)
             engine.runAndWait()
             engine.stop()
 
