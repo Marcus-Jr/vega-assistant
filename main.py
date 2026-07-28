@@ -1,3 +1,13 @@
+"""
+VEGA - Assistente Virtual V3
+Full Duplex com PyAudio + Pygame + pyttsx3
+Modelo de IA gratuito via OpenRouter
+- Ouve enquanto fala (Full Duplex)
+- Pode ser interrompido a qualquer momento
+- Continua a conversa automaticamente
+- Responde hora atual e clima (inclusive previsão para dias futuros) diretamente, sem depender da IA
+"""
+
 import speech_recognition as sr
 from openai import OpenAI
 import pyttsx3
@@ -8,6 +18,9 @@ import pygame
 import numpy as np
 import time
 import tempfile
+import requests
+from datetime import datetime
+from collections import Counter
 
 from dotenv import load_dotenv
 
@@ -31,26 +44,54 @@ INTERRUPTION_THRESHOLD = 1500
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1024
 
+# Cidade usada quando o usuário pergunta o clima sem especificar o local
+DEFAULT_CITY = os.getenv("DEFAULT_CITY", "São Paulo")
+
+# Descrições em português para os códigos de clima da Open-Meteo (WMO)
+WEATHER_CODES = {
+    0: "céu limpo",
+    1: "poucas nuvens",
+    2: "parcialmente nublado",
+    3: "nublado",
+    45: "névoa",
+    48: "névoa com geada",
+    51: "garoa fraca",
+    53: "garoa moderada",
+    55: "garoa forte",
+    61: "chuva fraca",
+    63: "chuva moderada",
+    65: "chuva forte",
+    71: "neve fraca",
+    73: "neve moderada",
+    75: "neve forte",
+    80: "pancadas de chuva fracas",
+    81: "pancadas de chuva moderadas",
+    82: "pancadas de chuva fortes",
+    95: "trovoadas",
+    96: "trovoadas com granizo leve",
+    99: "trovoadas com granizo forte",
+}
+
 # Inicializa o mixer do pygame
 pygame.mixer.init()
 
 
 class Vega:
     """
-    Vega Assistant V2
+    Vega Assistant V3
     - Ouve enquanto fala (Full Duplex)
     - Pode ser interrompido a qualquer momento
     - Continua a conversa automaticamente
     """
 
     def __init__(self, key):
-        # Cliente OpenRouter (mantido da V1)
+        # Cliente OpenRouter (modelo gratuito)
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=key,
         )
 
-        # Reconhecimento de voz (mantido da V1)
+        # Reconhecimento de voz
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
 
@@ -74,7 +115,7 @@ class Vega:
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.pause_threshold = SILENCE_PAUSE
 
-        print("Inicializando o Vega Assistant V2...")
+        print("Inicializando o Vega Assistant V3...")
         print("Full Duplex ativado (ouve enquanto fala)")
         print("=" * 60)
 
@@ -208,7 +249,7 @@ class Vega:
             stream.close()
 
     # =========================================================
-    # ESCUTAR (mantendo nome da V1)
+    # ESCUTAR
     # =========================================================
 
     def listen(self):
@@ -255,9 +296,284 @@ class Vega:
             except Exception as e:
                 print(f"Erro ao ouvir: {e}")
                 return None
-            
+
     # =========================================================
-    # PENSAR (mantendo nome da V1)
+    # HORA E CLIMA (respostas diretas, sem passar pela IA)
+    # =========================================================
+
+    def get_time(self):
+        """
+        Retorna a hora atual formatada, com saudação de acordo com o período do dia.
+        """
+
+        now = datetime.now()
+        hour = now.hour
+
+        if hour < 12:
+            greeting = "Bom dia"
+        elif hour < 18:
+            greeting = "Boa tarde"
+        else:
+            greeting = "Boa noite"
+
+        return f"{greeting}! Agora são {now.strftime('%H:%M')}."
+
+    def get_weather(self, city, day_offset=None, week_summary=False):
+        """
+        Busca o clima de uma cidade usando a API gratuita Open-Meteo
+        (geocodificação + previsão), sem necessidade de chave de API.
+
+        - day_offset=None e week_summary=False -> clima atual (agora)
+        - day_offset=0 -> hoje (máx/mín do dia)
+        - day_offset=1 -> amanhã
+        - day_offset=N -> daqui a N dias (ex: um dia da semana específico)
+        - week_summary=True -> resumo dos próximos 7 dias
+        """
+
+        try:
+            geo_response = requests.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={
+                    "name": city,
+                    "count": 1,
+                    "language": "pt",
+                    "format": "json",
+                },
+                timeout=5,
+            )
+            geo_data = geo_response.json()
+            results = geo_data.get("results")
+
+            if not results:
+                return f"Não consegui encontrar a cidade {city}."
+
+            place = results[0]
+            latitude = place["latitude"]
+            longitude = place["longitude"]
+            place_name = place.get("name", city)
+
+            forecast_response = requests.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "current_weather": True,
+                    "daily": "weathercode,temperature_2m_max,temperature_2m_min",
+                    "forecast_days": 8,
+                    "timezone": "auto",
+                },
+                timeout=5,
+            )
+            forecast_data = forecast_response.json()
+
+            # Clima atual (sem dia específico solicitado)
+            if day_offset is None and not week_summary:
+                current = forecast_data.get("current_weather")
+
+                if not current:
+                    return f"Não consegui obter o clima de {place_name} agora."
+
+                temperature = current["temperature"]
+                code = current["weathercode"]
+                description = WEATHER_CODES.get(code, "condição não identificada")
+
+                return (
+                    f"Em {place_name} agora está {description}, "
+                    f"com {temperature:.0f} graus."
+                )
+
+            daily = forecast_data.get("daily")
+
+            if not daily:
+                return f"Não consegui obter a previsão de {place_name}."
+
+            # Resumo da semana que vem (próximos 7 dias)
+            if week_summary:
+                codes = daily["weathercode"][1:8]
+                max_temps = daily["temperature_2m_max"][1:8]
+                min_temps = daily["temperature_2m_min"][1:8]
+
+                if not codes:
+                    return f"Não consegui obter a previsão semanal de {place_name}."
+
+                dominant_code = Counter(codes).most_common(1)[0][0]
+                description = WEATHER_CODES.get(dominant_code, "condição variada")
+
+                return (
+                    f"Na semana que vem em {place_name}, a previsão é de "
+                    f"{description}, com temperaturas entre "
+                    f"{min(min_temps):.0f} e {max(max_temps):.0f} graus."
+                )
+
+            # Previsão para um dia específico
+            index = day_offset
+            dates = daily["time"]
+
+            if index >= len(dates):
+                return f"Só consigo prever até {len(dates) - 1} dias à frente, desculpe."
+
+            date_str = dates[index]
+            tmax = daily["temperature_2m_max"][index]
+            tmin = daily["temperature_2m_min"][index]
+            code = daily["weathercode"][index]
+            description = WEATHER_CODES.get(code, "condição não identificada")
+
+            day_label = self._format_day_label(day_offset, date_str)
+
+            return (
+                f"Para {day_label} em {place_name}, a previsão é de "
+                f"{description}, com mínima de {tmin:.0f} e "
+                f"máxima de {tmax:.0f} graus."
+            )
+
+        except Exception as e:
+            print(f"Erro ao buscar clima: {e}")
+            return "Desculpe, não consegui buscar a previsão do tempo agora."
+
+    def _format_day_label(self, day_offset, date_str):
+        """
+        Converte um deslocamento de dias em um rótulo falado
+        (ex: 'amanhã', 'quinta-feira (01/08)').
+        """
+
+        if day_offset == 0:
+            return "hoje"
+
+        if day_offset == 1:
+            return "amanhã"
+
+        if day_offset == 2:
+            return "depois de amanhã"
+
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+
+        weekday_names = [
+            "segunda-feira",
+            "terça-feira",
+            "quarta-feira",
+            "quinta-feira",
+            "sexta-feira",
+            "sábado",
+            "domingo",
+        ]
+
+        weekday_name = weekday_names[date_obj.weekday()]
+
+        return f"{weekday_name} ({date_obj.strftime('%d/%m')})"
+
+    def _detect_forecast_target(self, text):
+        """
+        Analisa o texto e decide para qual dia é a previsão pedida.
+        Retorna (day_offset, week_summary):
+        - (None, False) -> clima atual
+        - (N, False)     -> daqui a N dias
+        - (None, True)   -> resumo da semana que vem
+        """
+
+        text_lower = text.lower()
+
+        if (
+            "semana que vem" in text_lower
+            or "próxima semana" in text_lower
+            or "proxima semana" in text_lower
+        ):
+            return None, True
+
+        if "depois de amanhã" in text_lower or "depois de amanha" in text_lower:
+            return 2, False
+
+        if "amanhã" in text_lower or "amanha" in text_lower:
+            return 1, False
+
+        if "hoje" in text_lower:
+            return 0, False
+
+        weekday_map = {
+            "segunda": 0,
+            "terça": 1,
+            "terca": 1,
+            "quarta": 2,
+            "quinta": 3,
+            "sexta": 4,
+            "sábado": 5,
+            "sabado": 5,
+            "domingo": 6,
+        }
+
+        for name, target_weekday in weekday_map.items():
+            if name in text_lower:
+                today_weekday = datetime.now().weekday()
+                diff = (target_weekday - today_weekday) % 7
+
+                if diff == 0:
+                    diff = 7
+
+                return diff, False
+
+        return None, False
+
+    def extract_city(self, text):
+        """
+        Extrai o nome da cidade a partir de frases como
+        'qual o clima em Curitiba' ou 'previsão do tempo para São Paulo'.
+        Retorna None se nenhuma cidade for encontrada.
+        """
+
+        for preposition in [" em ", " de ", " para ", " no ", " na "]:
+            index = text.lower().rfind(preposition)
+
+            if index != -1:
+                city = text[index + len(preposition):].strip(" ?.!")
+
+                if city:
+                    return city
+
+        return None
+
+    def try_direct_answer(self, text):
+        """
+        Responde diretamente perguntas sobre hora e clima, sem chamar a IA.
+        Retorna a resposta pronta, ou None se o texto não for sobre isso.
+        """
+
+        text_lower = text.lower()
+
+        time_triggers = [
+            "que horas",
+            "qual é a hora",
+            "qual a hora",
+            "hora atual",
+            "me diz a hora",
+            "que horas são",
+        ]
+
+        if any(trigger in text_lower for trigger in time_triggers):
+            return self.get_time()
+
+        weather_triggers = [
+            "clima",
+            "tempo em",
+            "tempo agora",
+            "previsão",
+            "previsao",
+            "vai chover",
+            "como está o tempo",
+            "temperatura em",
+        ]
+
+        if any(trigger in text_lower for trigger in weather_triggers):
+            city = self.extract_city(text) or DEFAULT_CITY
+            day_offset, week_summary = self._detect_forecast_target(text)
+            return self.get_weather(
+                city,
+                day_offset=day_offset,
+                week_summary=week_summary
+            )
+
+        return None
+
+    # =========================================================
+    # PENSAR
     # =========================================================
 
     def think(self, text):
@@ -300,7 +616,7 @@ class Vega:
             )
 
     # =========================================================
-    # FALAR (mantendo nome da V1)
+    # FALAR
     # =========================================================
 
     def speak(self, text):
@@ -385,14 +701,14 @@ class Vega:
             time.sleep(1.0)
 
         return self.interrupt_event.is_set()
-    
-        # =========================================================
-    # LOOP PRINCIPAL (mantendo nome da V1)
+
+    # =========================================================
+    # LOOP PRINCIPAL
     # =========================================================
 
     def run(self):
         print("=" * 60)
-        print("Bem-vindo ao Vega Assistant V2!")
+        print("Bem-vindo ao Vega Assistant V3!")
         print("Agora eu consigo ouvir ENQUANTO estou falando.")
         print("=" * 60)
         print("Comandos: 'sair', 'encerrar', 'tchau'")
@@ -437,6 +753,14 @@ class Vega:
                 self.running = False
                 break
 
+            # Respostas diretas (hora / clima), sem passar pela IA
+            direct_response = self.try_direct_answer(text)
+
+            if direct_response:
+                self.speak(direct_response)
+                print("\n" + "=" * 60)
+                continue
+
             # Processa e responde
             response = self.think(text)
 
@@ -453,7 +777,7 @@ class Vega:
 
 
 # =============================================================
-# MAIN (mantido da V1)
+# MAIN
 # =============================================================
 
 def main():
