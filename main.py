@@ -28,6 +28,113 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # =========================
+# VISUAL DO TERMINAL (cores e ícones)
+# =========================
+
+try:
+    from colorama import init as _colorama_init, Fore, Back, Style
+    _colorama_init(autoreset=True)
+except ImportError:
+    # Fallback caso o colorama não esteja instalado:
+    # o programa continua funcionando, só sem cores.
+    class _Dummy:
+        def __getattr__(self, _name):
+            return ""
+
+    Fore = Back = Style = _Dummy()
+
+
+def _line(char="─", width=60, color=Fore.CYAN):
+    print(f"{color}{char * width}{Style.RESET_ALL}")
+
+
+VEGA_ASCII_ART = [
+    "██╗   ██╗███████╗ ██████╗  █████╗ ",
+    "██║   ██║██╔════╝██╔════╝ ██╔══██╗",
+    "██║   ██║█████╗  ██║  ███╗███████║",
+    "╚██╗ ██╔╝██╔══╝  ██║   ██║██╔══██║",
+    " ╚████╔╝ ███████╗╚██████╔╝██║  ██║",
+    "  ╚═══╝  ╚══════╝ ╚═════╝ ╚═╝  ╚═╝",
+]
+
+
+def print_vega_banner(subtitles=None):
+    """Banner ASCII art com o nome VEGA dentro de uma caixa."""
+    subtitles = subtitles or ["Vega Assistant V3", "Assistente Virtual com IA"]
+
+    content_width = max(
+        max(len(line) for line in VEGA_ASCII_ART),
+        max(len(line) for line in subtitles),
+    ) + 4
+
+    top = "╔" + "═" * content_width + "╗"
+    bottom = "╚" + "═" * content_width + "╝"
+    empty = "║" + " " * content_width + "║"
+
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}{top}")
+    print(empty)
+    for line in VEGA_ASCII_ART:
+        print("║" + line.center(content_width) + "║")
+    print(empty)
+    for line in subtitles:
+        print("║" + line.center(content_width) + "║")
+    print(empty)
+    print(f"{bottom}{Style.RESET_ALL}\n")
+
+
+def print_banner(title, subtitle=None, width=60):
+    """Caixa de destaque simples (usada fora da tela de abertura)."""
+    print()
+    print(f"{Fore.CYAN}{Style.BRIGHT}╔{'═' * (width - 2)}╗")
+    print(f"║{title.center(width - 2)}║")
+    if subtitle:
+        print(f"║{subtitle.center(width - 2)}║")
+    print(f"╚{'═' * (width - 2)}╝{Style.RESET_ALL}")
+    print()
+
+
+def print_section(text, width=60):
+    """Separador leve usado entre turnos de conversa."""
+    _line("─", width, Fore.CYAN + Style.DIM)
+
+
+def print_info(text):
+    print(f"{Fore.CYAN}{Style.RESET_ALL}{text}")
+
+
+def print_success(text):
+    print(f"{Fore.GREEN}{text}{Style.RESET_ALL}")
+
+
+def print_listening(text):
+    print(f"{Fore.YELLOW}{text}{Style.RESET_ALL}")
+
+
+def print_processing(text):
+    print(f"{Fore.CYAN}{text}{Style.RESET_ALL}")
+
+
+def print_user(text):
+    print(f"{Fore.MAGENTA}{Style.BRIGHT}Você:{Style.RESET_ALL} {text}")
+
+
+def print_vega(text):
+    print(f"{Fore.BLUE}{Style.BRIGHT}Vega:{Style.RESET_ALL} {text}")
+
+
+def print_warning(text):
+    print(f"{Fore.YELLOW}{text}{Style.RESET_ALL}")
+
+
+def print_error(text):
+    print(f"{Fore.RED}{text}{Style.RESET_ALL}")
+
+
+def print_interrupt(text):
+    print(f"{Fore.RED}{Style.BRIGHT}{text}{Style.RESET_ALL}")
+
+
+# =========================
 # CONFIGURAÇÕES
 # =========================
 
@@ -116,14 +223,14 @@ class Vega:
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.pause_threshold = SILENCE_PAUSE
 
-        print("Inicializando o Vega Assistant V3...")
-        print("Full Duplex ativado (ouve enquanto fala)")
-        print("=" * 60)
+        print_vega_banner()
+        print_info("Full Duplex ativado (ouve enquanto fala)")
+        _line("═")
 
         # Ajuste inicial de ruído
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=2)
-            print(
+            print_success(
                 f"Ruído ambiente ajustado: "
                 f"{self.recognizer.energy_threshold}"
             )
@@ -138,7 +245,7 @@ class Vega:
         Detecta quando o usuário tenta interromper a fala do Vega.
         """
 
-        print("Monitor de áudio iniciado")
+        print_success("Monitor de áudio iniciado")
 
         stream = self.pyaudio.open(
             format=pyaudio.paInt16,
@@ -189,7 +296,7 @@ class Vega:
                             high_count >= MIN_HIGH_COUNT
                             and not self.interrupt_event.is_set()
                         ):
-                            print(
+                            print_interrupt(
                                 f"Interrupção detectada! "
                                 f"Nível: {level:.0f}"
                             )
@@ -232,11 +339,11 @@ class Vega:
                                 language="pt-BR"
                             )
 
-                            print(f"Comando capturado: {text}")
+                            print_success(f"Comando capturado: {text}")
                             self.interrupted_command = text
 
                         except Exception:
-                            print(
+                            print_warning(
                                 "Não consegui entender a interrupção"
                             )
                             self.interrupted_command = None
@@ -258,7 +365,7 @@ class Vega:
         Escuta um comando completo do usuário.
         """
 
-        print("Ouvindo...")
+        print_listening("Ouvindo...")
 
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(
@@ -278,24 +385,24 @@ class Vega:
                     language="pt-BR"
                 )
 
-                print(f"Você disse: {text}")
+                print_user(text)
                 return text
 
             except sr.WaitTimeoutError:
-                print("Tempo limite excedido.")
+                print_warning("Tempo limite excedido.")
                 return None
 
             except sr.UnknownValueError:
                 if not self.interrupted_command:
-                    print("Não entendi o que você disse.")
+                    print_warning("Não entendi o que você disse.")
                 return None
 
             except sr.RequestError as e:
-                print(f"Erro no reconhecimento: {e}")
+                print_error(f"Erro no reconhecimento: {e}")
                 return None
 
             except Exception as e:
-                print(f"Erro ao ouvir: {e}")
+                print_error(f"Erro ao ouvir: {e}")
                 return None
 
     # =========================================================
@@ -428,7 +535,7 @@ class Vega:
             )
 
         except Exception as e:
-            print(f"Erro ao buscar clima: {e}")
+            print_error(f"Erro ao buscar clima: {e}")
             return "Desculpe, não consegui buscar a previsão do tempo agora."
 
     def _format_day_label(self, day_offset, date_str):
@@ -582,7 +689,7 @@ class Vega:
         Envia o texto para o OpenRouter e retorna a resposta.
         """
 
-        print("Processando...")
+        print_processing("Processando...")
 
         try:
             response = self.client.chat.completions.create(
@@ -612,11 +719,11 @@ class Vega:
 
             response_text = response.choices[0].message.content.strip()
 
-            print(f"Vega: {response_text}")
+            print_vega(response_text)
             return response_text
 
         except Exception as e:
-            print(f"Erro na IA: {e}")
+            print_error(f"Erro na IA: {e}")
             return (
                 "Desculpe, ocorreu um erro ao processar sua solicitação."
             )
@@ -680,8 +787,6 @@ class Vega:
         Pode ser interrompida a qualquer momento.
         """
 
-        # print(f"Vega: {text}\n")
-
         self.speaking = True
         self.interrupt_event.clear()
         self.interrupted_command = None
@@ -734,13 +839,13 @@ class Vega:
 
                 if self.interrupt_event.is_set():
                     pygame.mixer.music.stop()
-                    print("Fala interrompida!")
+                    print_interrupt("Fala interrompida!")
                     break
 
                 time.sleep(0.05)
 
         except Exception as e:
-            print(f"Erro ao falar: {e}")
+            print_error(f"Erro ao falar: {e}")
 
         finally:
             self.speaking = False
@@ -754,7 +859,7 @@ class Vega:
 
         # Aguarda o reconhecimento da interrupção
         if self.interrupt_event.is_set():
-            print("Processando o comando de interrupção...")
+            print_processing("Processando o comando de interrupção...")
             time.sleep(1.0)
 
         return self.interrupt_event.is_set()
@@ -764,12 +869,9 @@ class Vega:
     # =========================================================
 
     def run(self):
-        print("=" * 60)
-        print("Bem-vindo ao Vega Assistant V3!")
-        print("Agora eu consigo ouvir ENQUANTO estou falando.")
-        print("=" * 60)
-        print("Comandos: 'sair', 'encerrar', 'tchau'")
-        print("=" * 60)
+        print_info("Agora eu consigo ouvir ENQUANTO estou falando.")
+        print_info("Comandos: 'sair', 'encerrar', 'tchau'")
+        _line("═")
 
         # Inicia o monitor em thread separada
         monitor = threading.Thread(
@@ -788,7 +890,7 @@ class Vega:
                 text = self.interrupted_command
                 self.interrupted_command = None
 
-                print(
+                print_interrupt(
                     f"Usando comando da interrupção: {text}"
                 )
 
@@ -815,7 +917,7 @@ class Vega:
 
             if direct_response:
                 self.speak(direct_response)
-                print("\n" + "=" * 60)
+                print_section("")
                 continue
 
             # Processa e responde
@@ -824,13 +926,13 @@ class Vega:
             # Pode ser interrompido
             self.speak(response)
 
-            print("\n" + "=" * 60)
+            print_section("")
 
         # Limpeza
         self.pyaudio.terminate()
         pygame.mixer.quit()
 
-        print("Vega Assistant encerrado.")
+        print_success("Vega Assistant encerrado.")
 
 
 # =============================================================
@@ -841,7 +943,7 @@ def main():
     key = os.getenv("OPENROUTER_API_KEY")
 
     if not key:
-        print(
+        print_error(
             "A chave do OpenRouter não foi encontrada. "
             "Defina OPENROUTER_API_KEY no arquivo .env."
         )
@@ -852,10 +954,10 @@ def main():
         vega.run()
 
     except KeyboardInterrupt:
-        print("\nEncerrando o Vega Assistant. Até a próxima!")
+        print_warning("\nEncerrando o Vega Assistant. Até a próxima!")
 
     except Exception as e:
-        print(f"Ocorreu um erro: {e}")
+        print_error(f"Ocorreu um erro: {e}")
 
 
 if __name__ == "__main__":
