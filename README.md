@@ -1,7 +1,7 @@
 # Vega Assistant
 
 <p align="center">
-  <img src="image.png" alt="Vega Assistant" width="900">
+  <img src="image.png" alt="Vega Assistant" width="100%">
 </p>
 
 <p align="center">
